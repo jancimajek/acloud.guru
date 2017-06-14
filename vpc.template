@@ -1,0 +1,203 @@
+{
+  "AWSTemplateFormatVersion" : "2010-09-09",
+
+  "Description" : "Creates VPC as per the 9th chapter of acloud.guru AWS Associate Architect course.",
+
+  "Parameters" : {
+    "Ec2KeyPair" : {
+      "Type" : "AWS::EC2::KeyPair::KeyName",
+      "Description" : "Specify KeyPair that will be used to access the EC2 instances created by this stack. You can create a new key in Services > EC2 > Key Pairs."
+    },
+    "Ec2AmiGeneralPurpose" : {
+      "Type" : "AWS::EC2::Image::Id",
+      "Description" : "Specify a general purpose EC2 AMI ID that will be used for the Web Server and MySQL Server.",
+      "Default" : "ami-01ccc867"
+    }
+  },
+
+  "Resources" : {
+    "VPC" : {
+      "Type": "AWS::EC2::VPC",
+      "Properties": {
+        "CidrBlock": "10.0.0.0/16",
+        "InstanceTenancy": "default",
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "MyVPC"
+          }
+        ]
+      }
+    },
+
+    "SubnetPublic" : {
+      "Type" : "AWS::EC2::Subnet",
+      "Properties" : {
+        "AvailabilityZone" : "eu-west-1a",
+        "CidrBlock" : "10.0.1.0/24",
+        "MapPublicIpOnLaunch" : true,
+        "Tags" : [
+          {
+            "Key": "Name",
+            "Value": "Public SN 10.0.1.0/16 eu-west-1a"
+          }
+        ],
+        "VpcId" : { "Ref": "VPC" }
+      }
+    },
+
+    "SubnetPrivate" : {
+      "Type" : "AWS::EC2::Subnet",
+      "Properties" : {
+        "AvailabilityZone" : "eu-west-1b",
+        "CidrBlock" : "10.0.2.0/24",
+        "MapPublicIpOnLaunch" : false,
+        "Tags" : [
+          {
+            "Key": "Name",
+            "Value": "Private SN 10.0.2.0/16 eu-west-1b"
+          }
+        ],
+        "VpcId" : { "Ref": "VPC" }
+      }
+    },
+
+    "InternetGateway" : {
+      "Type" : "AWS::EC2::InternetGateway",
+      "Properties" : {
+        "Tags" : [
+          {
+            "Key": "Name",
+            "Value": "MyVPC Internet Gateway"
+          }
+        ]
+      }
+    },
+
+    "InternetGatewayAttachement" : {
+      "Type" : "AWS::EC2::VPCGatewayAttachment",
+      "Properties" : {
+        "InternetGatewayId" : { "Ref": "InternetGateway" },
+        "VpcId" : { "Ref": "VPC" }
+      }
+    },
+
+    "RouteTablePublic" : {
+      "Type" : "AWS::EC2::RouteTable",
+      "Properties" : {
+        "VpcId" : { "Ref": "VPC" },
+        "Tags" : [
+          {
+            "Key": "Name",
+            "Value": "Public Route"
+          }
+        ]
+      }
+    },
+
+    "RoutePublic" : {
+      "Type" : "AWS::EC2::Route",
+      "DependsOn" : "InternetGatewayAttachement",
+      "Properties" : {
+        "DestinationCidrBlock" : "0.0.0.0/0",
+        "GatewayId" : { "Ref": "InternetGateway" },
+        "RouteTableId" : { "Ref": "RouteTablePublic" }
+      }
+    },
+
+    "RouteTableAssociationPublic" : {
+      "Type" : "AWS::EC2::SubnetRouteTableAssociation",
+      "Properties" : {
+        "RouteTableId" : { "Ref": "RouteTablePublic" },
+        "SubnetId" : { "Ref": "SubnetPublic" }
+      }
+    },
+
+    "SGWebDMZ" : {
+      "Type" : "AWS::EC2::SecurityGroup",
+      "Properties" : {
+        "GroupName" : "Web DMZ Security Group",
+        "GroupDescription" : "Security group for Web server, NAT and Bastion hosts; allows incomming ssh and http/https traffic from anywhere",
+        "SecurityGroupIngress" : [
+          {
+            "CidrIp" : "0.0.0.0/0",
+            "IpProtocol" : "tcp",
+            "FromPort" : 22,
+            "ToPort" : 22
+          },
+          {
+            "CidrIp" : "0.0.0.0/0",
+            "IpProtocol" : "tcp",
+            "FromPort" : 80,
+            "ToPort" : 80
+          },
+          {
+            "CidrIp" : "0.0.0.0/0",
+            "IpProtocol" : "tcp",
+            "FromPort" : 443,
+            "ToPort" : 443
+          }
+        ],
+        "Tags" : [
+          {
+            "Key": "Name",
+            "Value": "Web DMZ Security Group"
+          }
+        ],
+        "VpcId" : { "Ref": "VPC" }
+      }
+    },
+
+    "SGRDS" : {
+      "Type" : "AWS::EC2::SecurityGroup",
+      "Properties" : {
+        "GroupName" : "RDS Security Group",
+        "GroupDescription" : "Security group for relational DB servers; allows incoming ssh and mysql traffic from the public subnet only",
+        "SecurityGroupIngress" : [
+          {
+            "CidrIp" : "10.0.1.0/24",
+            "IpProtocol" : "tcp",
+            "FromPort" : 22,
+            "ToPort" : 22
+          },
+          {
+            "CidrIp" : "10.0.1.0/24",
+            "IpProtocol" : "tcp",
+            "FromPort" : 3306,
+            "ToPort" : 3306
+          }
+        ],
+        "Tags" : [
+          {
+            "Key": "Name",
+            "Value": "RDS Security Group"
+          }
+        ],
+        "VpcId" : { "Ref": "VPC" }
+      }
+    },
+
+    "EC2WebServer" : {
+      "Type" : "AWS::EC2::Instance",
+      "DependsOn" : "InternetGatewayAttachement",
+      "Properties" : {
+        "AvailabilityZone" : "eu-west-1a",
+        "ImageId" : { "Ref": "Ec2AmiGeneralPurpose" },
+        "InstanceInitiatedShutdownBehavior" : "stop",
+        "InstanceType" : "t2.micro",
+        "KeyName" : { "Ref": "Ec2KeyPair" },
+        "SecurityGroupIds" : [
+          { "Ref": "SGWebDMZ" }
+        ],
+        "SubnetId" : { "Ref": "SubnetPublic" },
+        "Tags" : [
+          {
+            "Key": "Name",
+            "Value": "Web Server"
+          }
+        ],
+        "UserData" : "IyEvYmluL2Jhc2gNCnl1bSBpbnN0YWxsIGh0dHBkIC15DQp5dW0gdXBkYXRlIC15DQpzZXJ2aWNlIGh0dHBkIHN0YXJ0DQpjaGtjb25maWcgaHR0cGQgb24NCmVjaG8gIjxodG1sPjxoMT5IZWxsbyBDbG91ZCBHdXJ1cyE8L2gxPjwvaHRtbD4iID4gL3Zhci93d3cvaHRtbC9pbmRleC5odG1s"
+      }
+    }
+  }
+}
