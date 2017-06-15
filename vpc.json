@@ -12,6 +12,11 @@
       "Type" : "AWS::EC2::Image::Id",
       "Description" : "Specify a general purpose EC2 AMI ID that will be used for the Web Server and MySQL Server.",
       "Default" : "ami-01ccc867"
+    },
+    "Ec2AmiNat" : {
+      "Type" : "AWS::EC2::Image::Id",
+      "Description" : "Specify a NAT EC2 AMI ID that will be used for the NAT Instance.",
+      "Default" : "ami-076d5d61"
     }
   },
 
@@ -79,6 +84,37 @@
       "Properties" : {
         "InternetGatewayId" : { "Ref": "InternetGateway" },
         "VpcId" : { "Ref": "VPC" }
+      }
+    },
+
+    "RouteTablePrivate" : {
+      "Type" : "AWS::EC2::RouteTable",
+      "Properties" : {
+        "VpcId" : { "Ref": "VPC" },
+        "Tags" : [
+          {
+            "Key": "Name",
+            "Value": "Private Route"
+          }
+        ]
+      }
+    },
+
+    "RoutePrivateNAT" : {
+      "Type" : "AWS::EC2::Route",
+      "DependsOn" : "EC2NatInstance",
+      "Properties" : {
+        "DestinationCidrBlock" : "0.0.0.0/0",
+        "InstanceId" : { "Ref": "EC2NatInstance" },
+        "RouteTableId" : { "Ref": "RouteTablePrivate" }
+      }
+    },
+
+    "RouteTableAssociationPrivate" : {
+      "Type" : "AWS::EC2::SubnetRouteTableAssociation",
+      "Properties" : {
+        "RouteTableId" : { "Ref": "RouteTablePrivate" },
+        "SubnetId" : { "Ref": "SubnetPrivate" }
       }
     },
 
@@ -198,6 +234,70 @@
         ],
         "UserData" : "IyEvYmluL2Jhc2gNCnl1bSBpbnN0YWxsIGh0dHBkIC15DQp5dW0gdXBkYXRlIC15DQpzZXJ2aWNlIGh0dHBkIHN0YXJ0DQpjaGtjb25maWcgaHR0cGQgb24NCmVjaG8gIjxodG1sPjxoMT5IZWxsbyBDbG91ZCBHdXJ1cyE8L2gxPjwvaHRtbD4iID4gL3Zhci93d3cvaHRtbC9pbmRleC5odG1s"
       }
+    },
+
+    "EC2NatInstance" : {
+      "Type" : "AWS::EC2::Instance",
+      "DependsOn" : "InternetGatewayAttachement",
+      "Properties" : {
+        "AvailabilityZone" : "eu-west-1a",
+        "ImageId" : { "Ref": "Ec2AmiNat" },
+        "InstanceInitiatedShutdownBehavior" : "stop",
+        "InstanceType" : "t2.micro",
+        "KeyName" : { "Ref": "Ec2KeyPair" },
+        "SecurityGroupIds" : [
+          { "Ref": "SGWebDMZ" }
+        ],
+        "SourceDestCheck" : false,
+        "SubnetId" : { "Ref": "SubnetPublic" },
+        "Tags" : [
+          {
+            "Key": "Name",
+            "Value": "NAT Instance"
+          }
+        ]
+      }
+    },
+
+    "EC2MySQLServer" : {
+      "Type" : "AWS::EC2::Instance",
+      "DependsOn" : "RoutePrivateNAT",
+      "Properties" : {
+        "AvailabilityZone" : "eu-west-1b",
+        "ImageId" : { "Ref": "Ec2AmiGeneralPurpose" },
+        "InstanceInitiatedShutdownBehavior" : "stop",
+        "InstanceType" : "t2.micro",
+        "KeyName" : { "Ref": "Ec2KeyPair" },
+        "SecurityGroupIds" : [
+          { "Ref": "SGRDS" }
+        ],
+        "SubnetId" : { "Ref": "SubnetPrivate" },
+        "Tags" : [
+          {
+            "Key": "Name",
+            "Value": "MySQL Server"
+          }
+        ],
+        "UserData" : "IyEvYmluL2Jhc2gNCnl1bSBpbnN0YWxsIG15c3FsIC15DQp5dW0gdXBkYXRlIC15"
+      }
+    }
+
+  },
+
+  "Outputs" : {
+    "WebServerPublicIP" : {
+      "Description" : "Public IP address of the Web Server; use this to ssh into the box or to view the test web page in a browser",
+      "Value" : { "Fn::GetAtt" : [ "EC2WebServer", "PublicIp" ] }
+    },
+
+    "WebServerPrivateIP" : {
+      "Description" : "Provate IP address of the Web Server",
+      "Value" : { "Fn::GetAtt" : [ "EC2WebServer", "PrivateIp" ] }
+    },
+
+    "MySQLServerPrivateIP" : {
+      "Description" : "Private IP address of the MySQL Server; use this to ssh into the box or to connect to the MySQL server from the Public subnet",
+      "Value" : { "Fn::GetAtt" : [ "EC2MySQLServer", "PrivateIp" ] }
     }
   }
 }
