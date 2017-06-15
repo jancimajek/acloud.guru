@@ -291,8 +291,18 @@
     },
 
     "WebServerPrivateIP" : {
-      "Description" : "Provate IP address of the Web Server",
+      "Description" : "Private IP address of the Web Server",
       "Value" : { "Fn::GetAtt" : [ "EC2WebServer", "PrivateIp" ] }
+    },
+
+    "NatInstancePublicIP" : {
+      "Description" : "Public IP address of the NAT Instance; use this to ssh into the box",
+      "Value" : { "Fn::GetAtt" : [ "EC2NatInstance", "PublicIp" ] }
+    },
+
+    "NatInstancePrivateIP" : {
+      "Description" : "Private IP address of the NAT Instance",
+      "Value" : { "Fn::GetAtt" : [ "EC2NatInstance", "PrivateIp" ] }
     },
 
     "MySQLServerPrivateIP" : {
