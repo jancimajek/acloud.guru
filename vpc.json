@@ -13,11 +13,22 @@
       "Description" : "Specify a general purpose EC2 AMI ID that will be used for the Web Server and MySQL Server.",
       "Default" : "ami-01ccc867"
     },
+    "NatType" : {
+      "Type" : "String",
+      "Description" : "Choose whether to use NAT Gateway (prefered) or NAT Instance.",
+      "AllowedValues" : [ "NatGateway", "NatInstance" ],
+      "ConstraintDescription" : "NatType must be either NatGateway or NatInstance"
+    },
     "Ec2AmiNat" : {
       "Type" : "AWS::EC2::Image::Id",
-      "Description" : "Specify a NAT EC2 AMI ID that will be used for the NAT Instance.",
+      "Description" : "Specify a NAT EC2 AMI ID that will be used for the NAT Instance. Ignored if NatType = NatGateway.",
       "Default" : "ami-076d5d61"
     }
+  },
+
+  "Conditions" : {
+    "CreateNatGateway"  : { "Fn::Equals" : [ { "Ref": "NatType" }, "NatGateway" ] },
+    "CreateNatInstance" : { "Fn::Equals" : [ { "Ref": "NatType" }, "NatInstance" ] }
   },
 
   "Resources" : {
@@ -87,6 +98,24 @@
       }
     },
 
+    "ElasticIPForNatGateway" : {
+      "Type" : "AWS::EC2::EIP",
+      "Condition" : "CreateNatGateway",
+      "DependsOn" : "InternetGatewayAttachement",
+      "Properties" : {
+        "Domain" : "VPC"
+      }
+    },
+
+    "NatGateway" : {
+      "Type" : "AWS::EC2::NatGateway",
+      "Condition" : "CreateNatGateway",
+      "Properties" : {
+        "AllocationId" : { "Fn::GetAtt" : [ "ElasticIPForNatGateway", "AllocationId" ] },
+        "SubnetId" : { "Ref": "SubnetPublic" }
+      }
+    },
+
     "RouteTablePrivate" : {
       "Type" : "AWS::EC2::RouteTable",
       "Properties" : {
@@ -100,8 +129,19 @@
       }
     },
 
-    "RoutePrivateNAT" : {
+    "RoutePrivateNATGateway" : {
       "Type" : "AWS::EC2::Route",
+      "Condition" : "CreateNatGateway",
+      "Properties" : {
+        "DestinationCidrBlock" : "0.0.0.0/0",
+        "NatGatewayId" : { "Ref": "NatGateway" },
+        "RouteTableId" : { "Ref": "RouteTablePrivate" }
+      }
+    },
+
+    "RoutePrivateNATInstance" : {
+      "Type" : "AWS::EC2::Route",
+      "Condition" : "CreateNatInstance",
       "DependsOn" : "EC2NatInstance",
       "Properties" : {
         "DestinationCidrBlock" : "0.0.0.0/0",
@@ -232,12 +272,22 @@
             "Value": "Web Server"
           }
         ],
-        "UserData" : "IyEvYmluL2Jhc2gNCnl1bSBpbnN0YWxsIGh0dHBkIC15DQp5dW0gdXBkYXRlIC15DQpzZXJ2aWNlIGh0dHBkIHN0YXJ0DQpjaGtjb25maWcgaHR0cGQgb24NCmVjaG8gIjxodG1sPjxoMT5IZWxsbyBDbG91ZCBHdXJ1cyE8L2gxPjwvaHRtbD4iID4gL3Zhci93d3cvaHRtbC9pbmRleC5odG1s"
+        "UserData" : {
+          "Fn::Base64" : { "Fn::Join" : [ "", [
+            "#!/bin/bash\n",
+            "yum install httpd -y\n",
+            "yum update -y\n",
+            "service httpd start\n",
+            "chkconfig httpd on\n",
+            "echo \"<html><h1>Hello Cloud Gurus!</h1></html>\" > /var/www/html/index.html\n"
+          ] ] }
+        }
       }
     },
 
     "EC2NatInstance" : {
       "Type" : "AWS::EC2::Instance",
+      "Condition" : "CreateNatInstance",
       "DependsOn" : "InternetGatewayAttachement",
       "Properties" : {
         "AvailabilityZone" : "eu-west-1a",
@@ -261,7 +311,6 @@
 
     "EC2MySQLServer" : {
       "Type" : "AWS::EC2::Instance",
-      "DependsOn" : "RoutePrivateNAT",
       "Properties" : {
         "AvailabilityZone" : "eu-west-1b",
         "ImageId" : { "Ref": "Ec2AmiGeneralPurpose" },
@@ -276,9 +325,25 @@
           {
             "Key": "Name",
             "Value": "MySQL Server"
+          },
+          {
+            "Key" : "NatRoute",
+            "Value" : {
+              "Fn::If" : [
+                "CreateNatGateway",
+                { "Ref": "RoutePrivateNATGateway" },
+                { "Ref": "RoutePrivateNATInstance" }
+              ]
+            }
           }
         ],
-        "UserData" : "IyEvYmluL2Jhc2gNCnl1bSBpbnN0YWxsIG15c3FsIC15DQp5dW0gdXBkYXRlIC15"
+        "UserData" : {
+          "Fn::Base64" : { "Fn::Join" : [ "", [
+            "#!/bin/bash\n",
+            "yum install mysql -y\n",
+            "yum update -y\n"
+          ] ] }
+        }
       }
     }
 
@@ -295,14 +360,21 @@
       "Value" : { "Fn::GetAtt" : [ "EC2WebServer", "PrivateIp" ] }
     },
 
+    "NatType" : {
+      "Description" : "Type of NAT used, either NatGateway or NatInstance",
+      "Value" : { "Ref": "NatType" }
+    },
+
     "NatInstancePublicIP" : {
       "Description" : "Public IP address of the NAT Instance; use this to ssh into the box",
-      "Value" : { "Fn::GetAtt" : [ "EC2NatInstance", "PublicIp" ] }
+      "Value" : { "Fn::GetAtt" : [ "EC2NatInstance", "PublicIp" ] },
+      "Condition" : "CreateNatInstance"
     },
 
     "NatInstancePrivateIP" : {
       "Description" : "Private IP address of the NAT Instance",
-      "Value" : { "Fn::GetAtt" : [ "EC2NatInstance", "PrivateIp" ] }
+      "Value" : { "Fn::GetAtt" : [ "EC2NatInstance", "PrivateIp" ] },
+      "Condition" : "CreateNatInstance"
     },
 
     "MySQLServerPrivateIP" : {
